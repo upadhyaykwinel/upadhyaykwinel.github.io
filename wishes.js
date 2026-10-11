@@ -58,8 +58,8 @@ window.WISHBOOK = {
       emoji: "💋", note: "Berry, mini 8g",
       image: "https://images-static.nykaa.com/media/catalog/product/tr:h-800,w-800,cm-pad_resize/d/2/d204539LANEI00000343_a1.jpg" },
     { name: "Jimin Muse tee", price: 550,
-      link: "https://www.closetbangtan.com/products/jimin-muse-tee?variant=48791292870908",
-      emoji: "👕", note: "",
+      link: "https://www.closetbangtan.com/products/jimin-muse-tee?variant=48791292903676",
+      emoji: "👕", note: "Size L",
       image: "https://cdn.shopify.com/s/files/1/0750/2610/4572/files/Untitleddesign_10.png?v=1747825188&width=700" },
     { name: "Shea body butter", price: 748,
       link: "https://www.nykaa.com/the-body-shop-shea-body-butter/p/25289",
@@ -86,8 +86,8 @@ window.WISHBOOK = {
       emoji: "🍇", note: "Purple, 15ml bottle",
       image: "https://cdn.shopify.com/s/files/1/0582/0819/0643/files/PilotIroshizukuInkBottle_YamaBudo_Purple_-15ml_image1.jpg?v=1786688222&width=700" },
     { name: "BTS Arirang jersey", price: 1199,
-      link: "https://www.closetbangtan.com/products/arirang-jersey-preorder-only",
-      emoji: "🎽", note: "Preorder only",
+      link: "https://www.closetbangtan.com/products/arirang-jersey-preorder-only?variant=48893397926140",
+      emoji: "🎽", note: "Size M. Preorder only",
       image: "https://cdn.shopify.com/s/files/1/0750/2610/4572/files/jersey_54195abd-6775-48e9-bb28-85434fe3ad6e.png?v=1774594410&width=700" },
     { name: "Pelikan Jazz fountain pen", price: 1320,
       link: "https://makoba.com/products/pelikan-jazz-noble-elegance-fountain-pen-viola-rgt",
@@ -107,7 +107,7 @@ window.WISHBOOK = {
       image: "https://cdn.shopify.com/s/files/1/0128/4096/0057/files/7_3f5b4017-f235-410d-9989-d40e419c5128.jpg?v=1778139647&width=700" },
     { name: "Knee-high boots", price: 3606,
       link: "https://www.myntra.com/26328224",
-      emoji: "👢", note: "Delize, in tan",
+      emoji: "👢", note: "Size UK 5. Delize, in tan",
       image: "https://assets.myntassets.com/assets/images/26328224/2023/12/9/9c787b7e-ad3d-4e8f-85e1-4403ff7dd65c1702108023934DelizeTanwomenveganleatherchelseawesternKneeboot1.jpg" }
   ]
 };
