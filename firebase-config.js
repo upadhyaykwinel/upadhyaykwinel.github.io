@@ -5,10 +5,11 @@
 //  These values are fine to keep in a public repository.
 // ============================================================
 window.FIREBASE_CONFIG = {
-  apiKey: "PASTE_HERE",
-  authDomain: "PASTE_HERE",
-  projectId: "PASTE_HERE",
-  storageBucket: "PASTE_HERE",
-  messagingSenderId: "PASTE_HERE",
-  appId: "PASTE_HERE"
+  apiKey: "AIzaSyAItjTN8IzN2g0KRVsdZ_lAE8uP-oHQbFQ",
+  authDomain: "birthday-wishlist-ed0c5.firebaseapp.com",
+  projectId: "birthday-wishlist-ed0c5",
+  storageBucket: "birthday-wishlist-ed0c5.firebasestorage.app",
+  messagingSenderId: "507784552477",
+  appId: "1:507784552477:web:3e7c938e45b6436e5766f4",
+  measurementId: "G-ZRDJXX66Z5"
 };
