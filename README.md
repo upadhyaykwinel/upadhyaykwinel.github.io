@@ -23,38 +23,105 @@ Part 2.
 
 ## Part 2: Switch on reserving (about 5 minutes, free)
 
-GitHub can show a page but can't remember who reserved what, so the
-reservations are kept in a free Google Firebase database.
+GitHub can show a page but can't remember who reserved what, so that is
+kept in a free Google Firebase database.
 
 1. Go to [console.firebase.google.com](https://console.firebase.google.com),
    sign in with a Google account, and **create a project** (any name;
    you can turn Analytics off).
-2. In the left menu open **Build**, then **Firestore Database**, then
-   **Create database**. Choose **production mode** and any location.
-3. Open the **Rules** tab, replace everything with the block below, and
+2. In the left menu open **Build**, then **Authentication**, then
+   **Get started**. On the **Sign-in method** tab choose **Anonymous**,
+   switch it on, and **Save**. (Guests never see a login screen. This
+   quietly gives each guest's browser its own ID.)
+3. Open **Build**, then **Firestore Database**, then **Create database**.
+   Choose **production mode** and any location.
+4. Open the **Rules** tab, replace everything with the block below, and
    click **Publish**:
 
    ```
    rules_version = '2';
    service cloud.firestore {
      match /databases/{database}/documents {
-       match /claims/{giftId} {
+
+       // users table: each guest can read and write only their own row
+       match /users/{uid} {
+         allow read: if request.auth != null && request.auth.uid == uid;
+         allow create, update: if request.auth != null && request.auth.uid == uid
+           && request.resource.data.keys().hasOnly(['name', 'updatedAt'])
+           && request.resource.data.name is string
+           && request.resource.data.name.size() <= 40;
+       }
+
+       // gifts table: anyone can see what's taken; a guest can reserve a
+       // free gift, and only the guest who reserved it can free it again
+       match /gifts/{giftId} {
          allow read: if true;
-         allow create: if request.resource.data.keys().hasOnly(['at'])
-                       && request.resource.data.at is number;
-         allow delete: if true;
+         allow create: if request.auth != null && mineNow();
+         allow update: if request.auth != null
+           && (resource.data.status == 'available' || resource.data.boughtBy == request.auth.uid)
+           && (mineNow() || freeNow());
+
+         function fieldsOk() {
+           return request.resource.data.keys().hasOnly(
+             ['name', 'price', 'status', 'boughtBy', 'boughtByName', 'updatedAt']);
+         }
+         function mineNow() {
+           return fieldsOk()
+             && request.resource.data.status == 'taken'
+             && request.resource.data.boughtBy == request.auth.uid
+             && request.resource.data.boughtByName is string
+             && request.resource.data.boughtByName.size() <= 40;
+         }
+         function freeNow() {
+           return fieldsOk()
+             && request.resource.data.status == 'available'
+             && request.resource.data.boughtBy == null;
+         }
        }
      }
    }
    ```
 
-4. Click the **gear icon**, then **Project settings**. Under **Your apps**
+5. Click the **gear icon**, then **Project settings**. Under **Your apps**
    click the **</>** (web) icon, give it any nickname, and register it.
-5. Firebase shows a `firebaseConfig` block with six values. On GitHub,
+6. Firebase shows a `firebaseConfig` block with six values. On GitHub,
    open `firebase-config.js`, click the **pencil**, replace each
    `PASTE_HERE` with the matching value, and **Commit changes**.
 
 Refresh your site after a minute. The **I'm getting this** buttons appear.
+If the site says it couldn't load what's reserved, check steps 2 and 4.
+
+## How reserving works
+
+The first time a guest taps **I'm getting this**, the site asks for
+their name. After that their name shows on the gifts they reserve
+("Asha is getting this"), and they get a **Changed my mind** button to
+free a gift again. Guests can fix their name with **Change name** at the
+bottom of the page.
+
+The database has two tables (Firebase calls them collections):
+
+**`gifts`**: one row per gift. A row appears the first time someone
+reserves that gift, and is updated from then on.
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `price` | Copied from `wishes.js` so the row is easy to read |
+| `status` | `taken` or `available` |
+| `boughtBy` | The ID of the guest who reserved it (matches a row in `users`) |
+| `boughtByName` | That guest's name |
+| `updatedAt` | When it last changed |
+
+**`users`**: one row per guest, named by their ID.
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The name they typed |
+| `updatedAt` | When they last set it |
+
+A guest's ID belongs to the browser they used, so they need the same
+phone or laptop to undo a reservation. Names are typed, not verified,
+and anyone with the link can see who reserved what.
 
 ## Adding and changing gifts
 
@@ -84,8 +151,7 @@ Do it once on each device you use.
 
 ## To un-reserve something for a guest
 
-A guest can undo their own reservation from the same phone or browser
-they used. If they can't, open Firebase, then **Firestore Database**,
-then the `claims` collection, and delete the entry named after the gift.
-Opening that page shows you what's taken, so ask a friend if you want to
-stay surprised.
+If a guest can't undo it themselves, open Firebase, then **Firestore
+Database**, then the `gifts` table, open that gift's row, and change
+`status` to `available` and `boughtBy` to `null`. Opening that page shows
+you who is buying what, so ask a friend if you want to stay surprised.

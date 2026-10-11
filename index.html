@@ -117,6 +117,15 @@ body{
 .photo img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
 .foot{text-align:center; font-size:.85rem; color:var(--fg-soft)}
 .foot button{font:inherit; color:inherit; background:none; border:0; text-decoration:underline; cursor:pointer; padding:6px}
+.foot{display:flex; flex-direction:column; align-items:center; gap:2px}
+.who{border:0; padding:24px 22px 20px; background:var(--paper); color:var(--ink); width:min(22rem,calc(100% - 32px)); box-shadow:4px 6px 20px var(--shadow)}
+.who::backdrop{background:rgba(120,30,70,.35)}
+.who h2{font-family:var(--display); font-weight:400; font-size:1.6rem; margin:0 0 4px}
+.who p{margin:0 0 14px; font-size:.9rem; color:var(--ink-soft)}
+.who label{display:block; font-size:.74rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft)}
+.who input{font:600 1.1rem var(--body); color:var(--ink); background:transparent; border:0; border-bottom:2px dashed var(--line); padding:6px 2px; width:100%; margin-bottom:18px}
+.who input:focus{outline:0; border-bottom-color:var(--rose)}
+.who .row{display:flex; gap:10px}
 </style>
 </head>
 <body>
@@ -130,8 +139,23 @@ body{
   <div id="notes"></div>
   <nav class="tabs" id="tabs" aria-label="Budget"></nav>
   <main class="grid" id="grid" aria-live="polite"></main>
-  <footer class="foot"><button type="button" id="shieldBtn"></button></footer>
+  <footer class="foot">
+    <div id="meLine" hidden><span id="meText"></span> <button type="button" id="meBtn">Change name</button></div>
+    <button type="button" id="shieldBtn"></button>
+  </footer>
 </div>
+<dialog class="who" id="whoBox">
+  <form id="whoForm">
+    <h2>Who’s this from?</h2>
+    <p>Your name shows on the gifts you reserve, so nobody doubles up.</p>
+    <label for="whoName">Your name</label>
+    <input id="whoName" maxlength="40" autocomplete="given-name">
+    <div class="row">
+      <button class="btn quiet" type="button" id="whoCancel">Cancel</button>
+      <button class="btn dibs" type="submit">That’s me</button>
+    </div>
+  </form>
+</dialog>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="wishes.js"></script>
@@ -159,8 +183,9 @@ const GIFTS=(CFG.wishes||[]).filter(w=>w&&w.name).map(w=>({...w,price:Number(w.p
 const inBudget=(g,b)=>g.price>=b.min&&g.price<b.max;
 
 // live: 'loading' | 'on' | 'off' (not set up) | 'error'
-const S={live:fbReady?'loading':'off',claims:{},tab:'all',busy:{},mine:store.get('wb-mine')||{},shield:store.get('wb-shield')===true};
-let F=null, fdb=null;
+// rows: the "gifts" table from the database, keyed by gift id
+const S={live:fbReady?'loading':'off',rows:{},tab:'all',busy:{},uid:null,name:store.get('wb-name')||'',nameSaved:false,shield:store.get('wb-shield')===true};
+let F=null, fdb=null, pending=null;
 
 function renderNotes(){
   const box=$('notes');box.replaceChildren();
@@ -168,6 +193,7 @@ function renderNotes(){
   else if(S.live==='off')box.append(el('div',{class:'note',text:'Reserving isn’t switched on yet. You can still browse and use the buy links.'}));
   else if(S.live==='error')box.append(el('div',{class:'note',text:'Couldn’t load which gifts are reserved. Refresh the page to try again.'}));
   $('shieldBtn').textContent=S.shield?'Turn surprise mode off':'I’m the birthday girl: hide what’s been reserved';
+  $('meLine').hidden=!(S.live==='on'&&S.name);$('meText').textContent='You’re here as '+S.name+'.';
 }
 function renderTabs(){
   const nav=$('tabs');nav.replaceChildren();
@@ -178,7 +204,7 @@ function renderTabs(){
   }
 }
 function card(g){
-  const taken=!S.shield&&!!S.claims[g.id], mine=taken&&!!S.mine[g.id], busy=!!S.busy[g.id];
+  const r=S.rows[g.id], taken=!S.shield&&!!r&&r.status==='taken', mine=taken&&r.boughtBy===S.uid, busy=!!S.busy[g.id];
   const c=el('article',{class:'card'+(taken?' taken':'')});
   c.append(el('span',{class:'price',text:money(g.price)}));
   if(g.sample)c.append(el('span',{class:'sample',text:'sample'}));
@@ -193,7 +219,7 @@ function card(g){
     acts.append(el('div',{class:'mine',text:'You’re getting this ♡'}),url?buy():null,
       el('button',{class:'btn quiet',type:'button',disabled:busy,text:'Changed my mind',onclick:()=>unclaim(g.id)}));
   }else if(taken){
-    acts.append(el('div',{class:'soon',text:'Someone’s already got this one'}));
+    acts.append(el('div',{class:'soon',text:r.boughtByName?r.boughtByName+' is getting this':'Someone’s already got this one'}));
   }else{
     acts.append(buy());
     if(S.live==='on'&&!S.shield)acts.append(el('button',{class:'btn dibs',type:'button',disabled:busy,text:busy?'Reserving…':'I’m getting this',onclick:()=>claim(g.id)}));
@@ -210,33 +236,63 @@ function renderGrid(){
 }
 function render(){renderNotes();renderTabs();renderGrid()}
 
+// One row per gift in the "gifts" table, one row per person in the "users" table.
+function giftRow(g,taken){return {name:g.name,price:g.price,status:taken?'taken':'available',boughtBy:taken?S.uid:null,boughtByName:taken?S.name:null,updatedAt:Date.now()}}
+const oops=()=>toast('That didn’t save. Please try again in a moment.');
+
+async function saveName(name){
+  S.name=name;store.set('wb-name',name);
+  await F.setDoc(F.doc(fdb,'users',S.uid),{name,updatedAt:Date.now()});
+  S.nameSaved=true;
+  // keep the name on gifts this person already reserved in step
+  for(const id in S.rows){const r=S.rows[id];if(r.status==='taken'&&r.boughtBy===S.uid&&r.boughtByName!==name)await F.updateDoc(F.doc(fdb,'gifts',id),{boughtByName:name,updatedAt:Date.now()})}
+}
 async function claim(id){
-  if(!fdb||S.busy[id])return;S.busy[id]=1;render();
+  if(!fdb||!S.uid||S.busy[id])return;
+  if(!S.name){pending=id;openWho();return}
+  const g=GIFTS.find(x=>x.id===id);if(!g)return;
+  S.busy[id]=1;render();
   try{
+    if(!S.nameSaved)await saveName(S.name);
     await F.runTransaction(fdb,async tx=>{
-      const ref=F.doc(fdb,'claims',id), snap=await tx.get(ref);
-      if(snap.exists())throw new Error('taken');
-      tx.set(ref,{at:Date.now()});
+      const ref=F.doc(fdb,'gifts',id), snap=await tx.get(ref), d=snap.exists()?snap.data():null;
+      if(d&&d.status==='taken'&&d.boughtBy!==S.uid)throw new Error('taken');
+      tx.set(ref,giftRow(g,true));
     });
-    S.mine[id]=1;store.set('wb-mine',S.mine);toast('Reserved! It’s all yours to gift.');
-  }catch(e){toast(e&&e.message==='taken'?'Someone just reserved this one!':'That didn’t save. Please try again in a moment.')}
+    toast('Reserved! It’s all yours to gift.');
+  }catch(e){if(e&&e.message==='taken')toast('Someone just reserved this one!');else oops()}
   delete S.busy[id];render();
 }
 async function unclaim(id){
-  if(!fdb||S.busy[id])return;S.busy[id]=1;render();
-  try{await F.deleteDoc(F.doc(fdb,'claims',id));delete S.mine[id];store.set('wb-mine',S.mine);toast('Back on the list for someone else.')}
-  catch(e){toast('That didn’t save. Please try again in a moment.')}
+  const g=GIFTS.find(x=>x.id===id);
+  if(!fdb||!g||S.busy[id])return;S.busy[id]=1;render();
+  try{await F.setDoc(F.doc(fdb,'gifts',id),giftRow(g,false));toast('Back on the list for someone else.')}catch(e){oops()}
   delete S.busy[id];render();
 }
 async function connect(){
   if(!fbReady)return;
   try{
     const base='https://www.gstatic.com/firebasejs/10.12.2/';
-    const [app,fs]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
-    F=fs;fdb=fs.getFirestore(app.initializeApp(FB));
-    fs.onSnapshot(fs.collection(fdb,'claims'),q=>{const m={};q.forEach(d=>{m[d.id]=true});S.claims=m;S.live='on';render()},()=>{S.live='error';render()});
+    const [app,fs,au]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js'),import(base+'firebase-auth.js')]);
+    const fapp=app.initializeApp(FB);F=fs;fdb=fs.getFirestore(fapp);
+    // a quiet, password-free sign-in: gives this browser its own id so only it can undo its reservations
+    S.uid=(await au.signInAnonymously(au.getAuth(fapp))).user.uid;
+    fs.getDoc(fs.doc(fdb,'users',S.uid)).then(d=>{if(d.exists()&&d.data().name){S.name=d.data().name;S.nameSaved=true;store.set('wb-name',S.name);render()}}).catch(()=>{});
+    fs.onSnapshot(fs.collection(fdb,'gifts'),q=>{const m={};q.forEach(d=>{m[d.id]=d.data()});S.rows=m;S.live='on';render()},()=>{S.live='error';render()});
   }catch(e){S.live='error';render()}
 }
+
+function openWho(){$('whoName').value=S.name;$("whoBox").showModal();$('whoName').focus()}
+$('whoCancel').addEventListener('click',()=>{pending=null;$("whoBox").close()});
+$("whoBox").addEventListener("cancel",()=>{pending=null});
+$('meBtn').addEventListener('click',()=>{pending=null;openWho()});
+$('whoForm').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const name=$('whoName').value.trim().slice(0,40);if(!name){$('whoName').focus();return}
+  $("whoBox").close();const next=pending;pending=null;
+  try{await saveName(name)}catch(e){oops();render();return}
+  render();if(next)claim(next);
+});
 
 $('shieldBtn').addEventListener('click',()=>{S.shield=!S.shield;store.set('wb-shield',S.shield);render()});
 if(CFG.name){$('who').textContent=CFG.name+(/s$/i.test(CFG.name)?'’':'’s');document.title=$('who').textContent+' Birthday Wish Book'}
