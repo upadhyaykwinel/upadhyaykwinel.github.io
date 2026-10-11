@@ -6,7 +6,7 @@
 <title>Birthday Wish Book</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Yeseva+One&family=Gaegu:wght@400;700&family=Nunito:wght@400;600;800&display=swap">
 <style>
-html{margin:0} body{margin:0} [hidden]{display:none!important} img{max-width:100%}
+html{margin:0} body{margin:0; overflow-x:clip} [hidden]{display:none!important} img{max-width:100%}
 
 /* Layout: a scrapbook spread. Dotted pink page, tilted polaroid cards held on with washi tape,
    budget tabs as paper tags, reserved gifts get a rubber stamp. */
@@ -118,6 +118,8 @@ body{
 .foot{text-align:center; font-size:.85rem; color:var(--fg-soft)}
 .foot button{font:inherit; color:inherit; background:none; border:0; text-decoration:underline; cursor:pointer; padding:6px}
 .foot{display:flex; flex-direction:column; align-items:center; gap:2px}
+.btn.share{background:transparent; color:var(--rose-deep); border-style:dashed}
+.each{font-size:.8rem; color:var(--ink-soft); text-align:center; margin-top:-4px}
 .who{border:0; padding:24px 22px 20px; background:var(--paper); color:var(--ink); width:min(22rem,calc(100% - 32px)); box-shadow:4px 6px 20px var(--shadow)}
 .who::backdrop{background:rgba(120,30,70,.35)}
 .who h2{font-family:var(--display); font-weight:400; font-size:1.6rem; margin:0 0 4px}
@@ -203,26 +205,39 @@ function renderTabs(){
       el('b',{text:b.label}),el('small',{text:b.range+' · '+n})));
   }
 }
+const listNames=n=>n.length<2?(n[0]||''):n.slice(0,-1).join(', ')+' & '+n[n.length-1];
 function card(g){
-  const r=S.rows[g.id], taken=!S.shield&&!!r&&r.status==='taken', mine=taken&&r.boughtBy===S.uid, busy=!!S.busy[g.id];
-  const c=el('article',{class:'card'+(taken?' taken':'')});
+  // a row's status is 'available', 'taken' (closed) or 'sharing' (open for others to join)
+  const r=S.shield?null:S.rows[g.id], buyers=r&&r.buyers||{}, ids=Object.keys(buyers);
+  const held=!!r&&r.status!=='available'&&ids.length>0, mine=held&&S.uid in buyers, open=held&&r.status==='sharing';
+  const others=ids.filter(i=>i!==S.uid).map(i=>buyers[i]), busy=!!S.busy[g.id];
+  const c=el('article',{class:'card'+(held&&(mine||!open)?' taken':'')});
   c.append(el('span',{class:'price',text:money(g.price)}));
   if(g.sample)c.append(el('span',{class:'sample',text:'sample'}));
-  if(taken)c.append(el('span',{class:'stamp',text:mine?'Yours':'Taken'}));
+  if(held)c.append(el('span',{class:'stamp',text:mine?'Yours':open?'Sharing':'Taken'}));
   const photo=el('div',{class:'photo'},el('span',{'aria-hidden':'true',text:g.emoji||'🎁'}));
   if(g.image)photo.append(el('img',{src:g.image,alt:g.name,loading:'lazy',onerror(e){e.target.remove()}}));
   c.append(photo,el('h2',{text:g.name}));
   if(g.note)c.append(el('p',{class:'why',text:g.note}));
   const acts=el('div',{class:'acts'}), url=safeUrl(g.link);
   const buy=()=>url?el('a',{class:'btn buy',href:url,target:'_blank',rel:'noopener',text:'Buy it here ↗'}):el('div',{class:'soon',text:'link coming soon'});
+  const btn=(cls,text,fn)=>el('button',{class:'btn '+cls,type:'button',disabled:busy,text,onclick:fn});
+  const each=()=>ids.length>1?el('div',{class:'each',text:'about '+money(Math.ceil(g.price/ids.length))+' each'}):null;
+  const canAct=S.live==='on'&&!S.shield, add=(box,...kids)=>box.append(...kids.filter(Boolean));
   if(mine){
-    acts.append(el('div',{class:'mine',text:'You’re getting this ♡'}),url?buy():null,
-      el('button',{class:'btn quiet',type:'button',disabled:busy,text:'Changed my mind',onclick:()=>unclaim(g.id)}));
-  }else if(taken){
-    acts.append(el('div',{class:'soon',text:r.boughtByName?r.boughtByName+' is getting this':'Someone’s already got this one'}));
+    const withWho=others.length?' with '+listNames(others):'';
+    add(acts,el('div',{class:'mine',text:open?(others.length?'You’re splitting this'+withWho:'You’re splitting this. Waiting for someone to join'):'You’re getting this'+withWho+' ♡'}),each());
+    if(url)add(acts,buy());
+    add(acts,btn('share',open?'Stop taking joiners':(others.length?'Let more people join':'Open it up to share'),()=>setSharing(g.id,!open)),
+      btn('quiet','Changed my mind',()=>leave(g.id)));
+  }else if(open){
+    add(acts,el('div',{class:'soon',text:listNames(others)+(others.length>1?' are':' is')+' splitting this'}),each(),buy());
+    if(canAct)add(acts,btn('dibs',busy?'Joining…':'Join in',()=>reserve(g.id,true)));
+  }else if(held){
+    add(acts,el('div',{class:'soon',text:others.length?listNames(others)+(others.length>1?' are':' is')+' getting this':'Someone’s already got this one'}));
   }else{
-    acts.append(buy());
-    if(S.live==='on'&&!S.shield)acts.append(el('button',{class:'btn dibs',type:'button',disabled:busy,text:busy?'Reserving…':'I’m getting this',onclick:()=>claim(g.id)}));
+    add(acts,buy());
+    if(canAct)add(acts,btn('dibs',busy?'Reserving…':'I’m getting this',()=>reserve(g.id,false)),btn('share','Split it with someone',()=>reserve(g.id,true)));
   }
   c.append(acts);return c;
 }
@@ -237,37 +252,49 @@ function renderGrid(){
 function render(){renderNotes();renderTabs();renderGrid()}
 
 // One row per gift in the "gifts" table, one row per person in the "users" table.
-function giftRow(g,taken){return {name:g.name,price:g.price,status:taken?'taken':'available',boughtBy:taken?S.uid:null,boughtByName:taken?S.name:null,updatedAt:Date.now()}}
+// A gift row holds everyone buying it in "buyers" (guest id -> name).
 const oops=()=>toast('That didn’t save. Please try again in a moment.');
+const giftRef=id=>F.doc(fdb,'gifts',id);
 
 async function saveName(name){
   S.name=name;store.set('wb-name',name);
   await F.setDoc(F.doc(fdb,'users',S.uid),{name,updatedAt:Date.now()});
   S.nameSaved=true;
-  // keep the name on gifts this person already reserved in step
-  for(const id in S.rows){const r=S.rows[id];if(r.status==='taken'&&r.boughtBy===S.uid&&r.boughtByName!==name)await F.updateDoc(F.doc(fdb,'gifts',id),{boughtByName:name,updatedAt:Date.now()})}
+  // keep the name in step on gifts this person is already buying
+  for(const id in S.rows){const b=S.rows[id].buyers||{};if(S.uid in b&&b[S.uid]!==name)await F.updateDoc(giftRef(id),{['buyers.'+S.uid]:name,updatedAt:Date.now()})}
 }
-async function claim(id){
-  if(!fdb||!S.uid||S.busy[id])return;
-  if(!S.name){pending=id;openWho();return}
-  const g=GIFTS.find(x=>x.id===id);if(!g)return;
+// Read the row, let "change" work out the new buyers and status, and save it in one step
+async function editRow(id,change,done){
+  const g=GIFTS.find(x=>x.id===id);
+  if(!fdb||!S.uid||!g||S.busy[id])return;
   S.busy[id]=1;render();
   try{
-    if(!S.nameSaved)await saveName(S.name);
+    if(!S.nameSaved&&S.name)await saveName(S.name);
     await F.runTransaction(fdb,async tx=>{
-      const ref=F.doc(fdb,'gifts',id), snap=await tx.get(ref), d=snap.exists()?snap.data():null;
-      if(d&&d.status==='taken'&&d.boughtBy!==S.uid)throw new Error('taken');
-      tx.set(ref,giftRow(g,true));
+      const snap=await tx.get(giftRef(id)), d=snap.exists()?snap.data():{};
+      const old=d.status&&d.status!=='available'?{status:d.status,buyers:{...(d.buyers||{})}}:{status:'available',buyers:{}};
+      const next=change(old);
+      tx.set(giftRef(id),{name:g.name,price:g.price,status:Object.keys(next.buyers).length?next.status:'available',buyers:next.buyers,updatedAt:Date.now()});
     });
-    toast('Reserved! It’s all yours to gift.');
+    toast(done);
   }catch(e){if(e&&e.message==='taken')toast('Someone just reserved this one!');else oops()}
   delete S.busy[id];render();
 }
-async function unclaim(id){
-  const g=GIFTS.find(x=>x.id===id);
-  if(!fdb||!g||S.busy[id])return;S.busy[id]=1;render();
-  try{await F.setDoc(F.doc(fdb,'gifts',id),giftRow(g,false));toast('Back on the list for someone else.')}catch(e){oops()}
-  delete S.busy[id];render();
+// share=false: just me. share=true: start a split, or join one that is open.
+function reserve(id,share){
+  if(!S.name){pending={id,share};openWho();return}
+  const row=S.rows[id], joining=!!row&&row.status==='sharing';
+  editRow(id,old=>{
+    const someoneElse=Object.keys(old.buyers).some(i=>i!==S.uid);
+    if(someoneElse&&old.status!=='sharing')throw new Error('taken');
+    return {status:someoneElse?'sharing':(share?'sharing':'taken'),buyers:{...old.buyers,[S.uid]:S.name}};
+  },joining?'You’re in! Say hi to your gift buddies.':share?'Reserved, and open for others to join.':'Reserved! It’s all yours to gift.');
+}
+function leave(id){
+  editRow(id,old=>{const b={...old.buyers};delete b[S.uid];return {status:old.status,buyers:b}},'Back on the list for someone else.');
+}
+function setSharing(id,on){
+  editRow(id,old=>{if(!(S.uid in old.buyers))throw new Error('gone');return {status:on?'sharing':'taken',buyers:old.buyers}},on?'Open for others to join.':'Closed. No more joiners.');
 }
 async function connect(){
   if(!fbReady)return;
@@ -291,7 +318,7 @@ $('whoForm').addEventListener('submit',async ev=>{
   const name=$('whoName').value.trim().slice(0,40);if(!name){$('whoName').focus();return}
   $("whoBox").close();const next=pending;pending=null;
   try{await saveName(name)}catch(e){oops();render();return}
-  render();if(next)claim(next);
+  render();if(next)reserve(next.id,next.share);
 });
 
 $('shieldBtn').addEventListener('click',()=>{S.shield=!S.shield;store.set('wb-shield',S.shield);render()});

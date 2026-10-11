@@ -52,30 +52,39 @@ kept in a free Google Firebase database.
            && request.resource.data.name.size() <= 40;
        }
 
-       // gifts table: anyone can see what's taken; a guest can reserve a
-       // free gift, and only the guest who reserved it can free it again
+       // gifts table: anyone can see what's taken. A guest can only add,
+       // rename or remove THEMSELVES in a gift's list of buyers.
        match /gifts/{giftId} {
          allow read: if true;
-         allow create: if request.auth != null && mineNow();
-         allow update: if request.auth != null
-           && (resource.data.status == 'available' || resource.data.boughtBy == request.auth.uid)
-           && (mineNow() || freeNow());
+         allow create: if request.auth != null && fieldsOk()
+           && after().keys().hasOnly([me()]) && me() in after()
+           && request.resource.data.status in ['taken', 'sharing'];
+         allow update: if request.auth != null && fieldsOk()
+           && after().diff(resource.data.buyers).affectedKeys().hasOnly([me()])
+           && (
+             // already one of the buyers: rename, leave, open or close sharing
+             (me() in resource.data.buyers && statusFits())
+             // not a buyer yet: take a free gift, or join one open for sharing
+             || (!(me() in resource.data.buyers) && me() in after() && (
+                  (resource.data.buyers.size() == 0
+                    && request.resource.data.status in ['taken', 'sharing'])
+                  || (resource.data.status == 'sharing'
+                    && request.resource.data.status == 'sharing')))
+           );
 
+         function me() { return request.auth.uid; }
+         function after() { return request.resource.data.buyers; }
          function fieldsOk() {
            return request.resource.data.keys().hasOnly(
-             ['name', 'price', 'status', 'boughtBy', 'boughtByName', 'updatedAt']);
+               ['name', 'price', 'status', 'buyers', 'updatedAt'])
+             && after() is map
+             && (!(me() in after())
+                 || (after()[me()] is string && after()[me()].size() <= 40));
          }
-         function mineNow() {
-           return fieldsOk()
-             && request.resource.data.status == 'taken'
-             && request.resource.data.boughtBy == request.auth.uid
-             && request.resource.data.boughtByName is string
-             && request.resource.data.boughtByName.size() <= 40;
-         }
-         function freeNow() {
-           return fieldsOk()
-             && request.resource.data.status == 'available'
-             && request.resource.data.boughtBy == null;
+         function statusFits() {
+           return after().size() == 0
+             ? request.resource.data.status == 'available'
+             : request.resource.data.status in ['taken', 'sharing'];
          }
        }
      }
@@ -91,13 +100,22 @@ kept in a free Google Firebase database.
 Refresh your site after a minute. The **I'm getting this** buttons appear.
 If the site says it couldn't load what's reserved, check steps 2 and 4.
 
-## How reserving works
+## How reserving and sharing work
 
-The first time a guest taps **I'm getting this**, the site asks for
-their name. After that their name shows on the gifts they reserve
-("Asha is getting this"), and they get a **Changed my mind** button to
-free a gift again. Guests can fix their name with **Change name** at the
-bottom of the page.
+The first time a guest reserves anything, the site asks for their name.
+Each free gift then has two buttons:
+
+- **I'm getting this**: the gift is theirs and shows as "Taken" with
+  their name.
+- **Split it with someone**: the gift shows as "Sharing" with their name
+  and a **Join in** button, so other guests can add themselves. The card
+  shows roughly what each person would pay.
+
+Anyone buying a gift can tap **Changed my mind** to drop out; when the
+last person drops out the gift is free again. They can also switch a
+gift between closed and open with **Open it up to share** and **Stop
+taking joiners**. Guests sort out the money between themselves; the site
+only shows who is in.
 
 The database has two tables (Firebase calls them collections):
 
@@ -107,9 +125,8 @@ reserves that gift, and is updated from then on.
 | Field | Meaning |
 | --- | --- |
 | `name`, `price` | Copied from `wishes.js` so the row is easy to read |
-| `status` | `taken` or `available` |
-| `boughtBy` | The ID of the guest who reserved it (matches a row in `users`) |
-| `boughtByName` | That guest's name |
+| `status` | `available`, `taken`, or `sharing` (open for others to join) |
+| `buyers` | Everyone buying it: each guest's ID (matches a row in `users`) with their name |
 | `updatedAt` | When it last changed |
 
 **`users`**: one row per guest, named by their ID.
@@ -120,7 +137,7 @@ reserves that gift, and is updated from then on.
 | `updatedAt` | When they last set it |
 
 A guest's ID belongs to the browser they used, so they need the same
-phone or laptop to undo a reservation. Names are typed, not verified,
+phone or laptop to drop out of a gift. Names are typed, not verified,
 and anyone with the link can see who reserved what.
 
 ## Adding and changing gifts
@@ -151,7 +168,8 @@ Do it once on each device you use.
 
 ## To un-reserve something for a guest
 
-If a guest can't undo it themselves, open Firebase, then **Firestore
-Database**, then the `gifts` table, open that gift's row, and change
-`status` to `available` and `boughtBy` to `null`. Opening that page shows
-you who is buying what, so ask a friend if you want to stay surprised.
+If a guest can't drop out themselves, open Firebase, then **Firestore
+Database**, then the `gifts` table, and open that gift's row. Delete
+their entry inside `buyers`; if nobody is left, also change `status` to
+`available`. Opening that page shows you who is buying what, so ask a
+friend if you want to stay surprised.
